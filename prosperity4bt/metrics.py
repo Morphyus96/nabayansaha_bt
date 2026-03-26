@@ -7,11 +7,14 @@ from statistics import mean, stdev
 
 from prosperity4bt.models import ActivityLogRow, BacktestResult
 
+TRADING_DAYS_PER_YEAR = 252
+
 
 @dataclass(frozen=True)
 class RiskMetrics:
     final_pnl: float
     sharpe_ratio: float
+    annualized_sharpe: float
     sortino_ratio: float
     max_drawdown_abs: float
     max_drawdown_pct: float
@@ -27,12 +30,6 @@ def portfolio_pnl_by_timestamp(activity_logs: list[ActivityLogRow]) -> list[tupl
 
 def equity_levels_from_activity(activity_logs: list[ActivityLogRow]) -> list[float]:
     return [v for _, v in portfolio_pnl_by_timestamp(activity_logs)]
-
-
-def period_pnl_changes(levels: list[float]) -> list[float]:
-    if len(levels) < 2:
-        return []
-    return [levels[i] - levels[i - 1] for i in range(1, len(levels))]
 
 
 def max_drawdown_from_levels(levels: list[float]) -> tuple[float, float]:
@@ -78,21 +75,10 @@ def calmar_from_pnl_and_drawdown(final_pnl: float, max_drawdown_abs: float) -> f
     return final_pnl / max_drawdown_abs
 
 
-def risk_metrics_from_activity_logs(activity_logs: list[ActivityLogRow]) -> RiskMetrics:
-    levels = equity_levels_from_activity(activity_logs)
-    if not levels:
-        return RiskMetrics(0.0, float("nan"), float("nan"), 0.0, float("nan"), float("nan"))
-    final_pnl = levels[-1]
-    changes = period_pnl_changes(levels)
-    max_dd_abs, max_dd_pct = max_drawdown_from_levels(levels)
-    return RiskMetrics(
-        final_pnl=final_pnl,
-        sharpe_ratio=sharpe_from_returns(changes),
-        sortino_ratio=sortino_from_returns(changes),
-        max_drawdown_abs=max_dd_abs,
-        max_drawdown_pct=max_dd_pct,
-        calmar_ratio=calmar_from_pnl_and_drawdown(final_pnl, max_dd_abs),
-    )
+def annualized_sharpe_from_sample_sharpe(sample_sharpe: float) -> float:
+    if math.isnan(sample_sharpe):
+        return float("nan")
+    return sample_sharpe * math.sqrt(TRADING_DAYS_PER_YEAR)
 
 
 def stitched_equity_levels(results: list[BacktestResult]) -> list[float]:
@@ -108,19 +94,49 @@ def stitched_equity_levels(results: list[BacktestResult]) -> list[float]:
     return out
 
 
-def risk_metrics_from_equity_levels(levels: list[float]) -> RiskMetrics:
-    if not levels:
-        return RiskMetrics(0.0, float("nan"), float("nan"), 0.0, float("nan"), float("nan"))
-    final_pnl = levels[-1]
-    changes = period_pnl_changes(levels)
-    max_dd_abs, max_dd_pct = max_drawdown_from_levels(levels)
+def _final_pnl_per_backtest_day(results: list[BacktestResult]) -> list[float]:
+    pnls: list[float] = []
+    for r in results:
+        lv = equity_levels_from_activity(r.activity_logs)
+        if lv:
+            pnls.append(lv[-1])
+    return pnls
+
+
+def risk_metrics_full_period(results: list[BacktestResult]) -> RiskMetrics:
+    """Sharpe/Sortino use one sample per backtest day; drawdown/Calmar use full stitched path."""
+    stitched = stitched_equity_levels(results)
+    if not stitched:
+        return RiskMetrics(
+            0.0,
+            float("nan"),
+            float("nan"),
+            float("nan"),
+            0.0,
+            float("nan"),
+            float("nan"),
+        )
+
+    final_pnl = stitched[-1]
+    max_dd_abs, max_dd_pct = max_drawdown_from_levels(stitched)
+
+    day_pnls = _final_pnl_per_backtest_day(results)
+    if len(day_pnls) >= 2:
+        sharpe = sharpe_from_returns(day_pnls)
+        sortino = sortino_from_returns(day_pnls)
+    else:
+        sharpe, sortino = float("nan"), float("nan")
+
+    ann_sharpe = annualized_sharpe_from_sample_sharpe(sharpe)
+    calmar = calmar_from_pnl_and_drawdown(final_pnl, max_dd_abs)
     return RiskMetrics(
         final_pnl=final_pnl,
-        sharpe_ratio=sharpe_from_returns(changes),
-        sortino_ratio=sortino_from_returns(changes),
+        sharpe_ratio=sharpe,
+        annualized_sharpe=ann_sharpe,
+        sortino_ratio=sortino,
         max_drawdown_abs=max_dd_abs,
         max_drawdown_pct=max_dd_pct,
-        calmar_ratio=calmar_from_pnl_and_drawdown(final_pnl, max_dd_abs),
+        calmar_ratio=calmar,
     )
 
 
@@ -136,13 +152,16 @@ def format_metric_value(x: float, *, int_style: bool = False) -> str:
 
 def format_risk_metrics_block(m: RiskMetrics, *, indent: str = "  ") -> str:
     if not math.isnan(m.max_drawdown_pct) and not math.isinf(m.max_drawdown_pct):
-        dd_pct_s = f"{m.max_drawdown_pct * 100:.2f}%"
+        dd_pct_display = format_metric_value(m.max_drawdown_pct)
     else:
-        dd_pct_s = "n/a"
+        dd_pct_display = "n/a"
     lines = [
-        f"{indent}Sharpe ratio: {format_metric_value(m.sharpe_ratio)} (per timestep ΔPnL, not annualized)",
-        f"{indent}Sortino ratio: {format_metric_value(m.sortino_ratio)} (per timestep ΔPnL, not annualized)",
-        f"{indent}Max drawdown: {format_metric_value(m.max_drawdown_abs, int_style=True)} ({dd_pct_s} of peak)",
-        f"{indent}Calmar ratio: {format_metric_value(m.calmar_ratio)} (final PnL / max drawdown)",
+        f"{indent}final_pnl: {format_metric_value(m.final_pnl, int_style=True)}",
+        f"{indent}sharpe_ratio: {format_metric_value(m.sharpe_ratio)}",
+        f"{indent}annualized_sharpe: {format_metric_value(m.annualized_sharpe)}",
+        f"{indent}sortino_ratio: {format_metric_value(m.sortino_ratio)}",
+        f"{indent}max_drawdown_abs: {format_metric_value(m.max_drawdown_abs, int_style=True)}",
+        f"{indent}max_drawdown_pct: {dd_pct_display}",
+        f"{indent}calmar_ratio: {format_metric_value(m.calmar_ratio)}",
     ]
     return "\n".join(lines)
