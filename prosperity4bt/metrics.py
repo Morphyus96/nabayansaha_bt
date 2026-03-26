@@ -119,7 +119,7 @@ def risk_metrics_from_equity_levels(levels: list[float]) -> RiskMetrics:
         sharpe_ratio=sharpe_from_returns(changes),
         sortino_ratio=sortino_from_returns(changes),
         max_drawdown_abs=max_dd_abs,
-        max_dd_pct=max_dd_pct,
+        max_drawdown_pct=max_dd_pct,
         calmar_ratio=calmar_from_pnl_and_drawdown(final_pnl, max_dd_abs),
     )
 
