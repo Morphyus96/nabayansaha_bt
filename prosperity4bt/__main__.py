@@ -10,6 +10,12 @@ from typer import Argument, Option, Typer
 
 from prosperity4bt.data import has_day_data
 from prosperity4bt.file_reader import FileReader, FileSystemReader, PackageResourcesReader
+from prosperity4bt.metrics import (
+    format_risk_metrics_block,
+    risk_metrics_from_activity_logs,
+    risk_metrics_from_equity_levels,
+    stitched_equity_levels,
+)
 from prosperity4bt.models import BacktestResult, TradeMatchingMode
 from prosperity4bt.open import open_visualizer
 from prosperity4bt.runner import run_backtest
@@ -115,6 +121,9 @@ def print_day_summary(result: BacktestResult) -> None:
 
     print(*reversed(product_lines), sep="\n")
     print(f"Total profit: {total_profit:,.0f}")
+    m = risk_metrics_from_activity_logs(result.activity_logs)
+    print("Risk metrics:")
+    print(format_risk_metrics_block(m))
 
 
 def merge_results(
@@ -187,6 +196,10 @@ def print_overall_summary(results: list[BacktestResult]) -> None:
         total_profit += profit
 
     print(f"Total profit: {total_profit:,.0f}")
+    stitched = stitched_equity_levels(results)
+    om = risk_metrics_from_equity_levels(stitched)
+    print("Risk metrics (stitched cumulative path across days):")
+    print(format_risk_metrics_block(om))
 
 
 def format_path(path: Path) -> str:
