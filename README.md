@@ -9,50 +9,52 @@ This repository contains a backtester for [IMC Prosperity 4](https://prosperity.
 Basic usage:
 ```sh
 # Install the latest version of the backtester
-$ pip install -U prosperity4bt
+$ pip install -U prosperity4btest
 
 # Run the backtester on an algorithm using all data from round 0
-$ prosperity4bt <path to algorithm file> 0
+$ prosperity4btest <path to algorithm file> 0
 ```
 
-Run `pip install -U prosperity4bt` again when you want to update the backtester to the latest version.
+Run `pip install -U prosperity4btest` again when you want to update the backtester to the latest version.
+
+The PyPI distribution and CLI are named `prosperity4btest`. The Python package directory is still `prosperity4bt` (e.g. bundled data lives under `prosperity4bt/resources`).
 
 Some more usage examples:
 ```sh
 # Backtest on all days from round 1
-$ prosperity4bt example/starter.py 1
+$ prosperity4btest example/starter.py 1
 
 # Backtest on round 1 day 0
-$ prosperity4bt example/starter.py 1-0
+$ prosperity4btest example/starter.py 1-0
 
 # Backtest on round 1 day -1 and round 1 day 0
-$ prosperity4bt example/starter.py 1--1 1-0
+$ prosperity4btest example/starter.py 1--1 1-0
 
 # Backtest on all days from rounds 1 and 2
-$ prosperity4bt example/starter.py 1 2
+$ prosperity4btest example/starter.py 1 2
 
 # You get the idea
 
 # Merge profit and loss across days
-$ prosperity4bt example/starter.py 1 --merge-pnl
+$ prosperity4btest example/starter.py 1 --merge-pnl
 
 # Automatically open the result in the visualizer when done
 # Assumes your algorithm logs in the visualizer's expected format
-$ prosperity4bt example/starter.py 1 --vis
+$ prosperity4btest example/starter.py 1 --vis
 
 # Write algorithm output to custom file
-$ prosperity4bt example/starter.py 1 --out example.log
+$ prosperity4btest example/starter.py 1 --out example.log
 
 # Skip saving the output log to a file
-$ prosperity4bt example/starter.py 1 --no-out
+$ prosperity4btest example/starter.py 1 --no-out
 
 # Backtest on custom data
 # Requires the value passed to `--data` to be a path to a directory that is similar in structure to https://github.com/nabayansaha/imc-prosperity-4-backtester/tree/master/prosperity4bt/resources
-$ prosperity4bt example/starter.py 1 --data prosperity4bt/resources
+$ prosperity4btest example/starter.py 1 --data prosperity4bt/resources
 
 # Print trader's output to stdout while running
 # This may be helpful when debugging a broken trader
-$ prosperity4bt example/starter.py 1 --print
+$ prosperity4btest example/starter.py 1 --print
 ```
 
 ## Order Matching
@@ -64,7 +66,17 @@ Matching orders against market trades can be configured through the `--match-tra
 - `--match-trades worse`: match market trades with prices worse than your quotes, inspired by [team Linear Utility's Prosperity 2 write-up](https://github.com/ericcccsliu/imc-prosperity-2).
 - `--match-trades none`: do not match market trades against orders.
 
-Limits are enforced before orders are matched to order depths. If for a product your position would exceed the limit, assuming all your orders would get filled, all your orders for that product get canceled.
+Limits are enforced before orders are matched to order depths. If for a product your position would exceed the limit, assuming all your orders would get filled, all your orders for that product get canceled. During matching, each fill is also clamped so your position never goes beyond the configured limit (even if multiple price levels would otherwise fill more).
+
+### Position limits
+
+Known Prosperity 4 products are defined in `prosperity4bt/data.py` (`LIMITS`). The tutorial round uses **80** for `EMERALDS` and `TOMATOES`. Any product not listed there uses a default of **50** until you add it to `LIMITS`.
+
+Override limits from the CLI without editing code:
+
+```sh
+prosperity4btest sample.py 0 --limit EMERALDS:80 --limit TOMATOES:80
+```
 
 ## Data Files
 
@@ -84,4 +96,20 @@ Follow these steps if you want to make changes to the backtester:
 3. Open a terminal in your clone of the repository.
 4. Create a venv with `uv venv` and activate it.
 5. Run `uv sync`.
-6. Any changes you make are now automatically taken into account the next time you run `prosperity4bt` inside the venv.
+6. Any changes you make are now automatically taken into account the next time you run `prosperity4btest` inside the venv.
+
+## Publishing to PyPI
+
+Releases are built and published with [GitHub Actions](.github/workflows/build.yml) using [trusted publishing](https://docs.pypi.org/trusted-publishers/) (no long-lived PyPI token in the repo).
+
+1. On [PyPI](https://pypi.org), open **Account settings** → **Publishing** → **Add a new pending publisher**.
+2. Set **PyPI project name** to `prosperity4btest`, **Owner** to `nabayansaha`, **Repository name** to `imc-prosperity-4-backtester`, **Workflow name** to `build.yml`, and **Environment name** to `pypi`.
+3. On GitHub: repository **Settings** → **Environments** → create an environment named `pypi` (no protection rules required unless you want them).
+4. Tag and push a version; the workflow replaces `version = "0.0.0"` in `pyproject.toml` with the tag name and uploads the wheel and sdist:
+
+```sh
+git tag 0.1.0
+git push origin 0.1.0
+```
+
+The `publish` job only runs on tag pushes. The project name must match your pending publisher (`prosperity4btest`).

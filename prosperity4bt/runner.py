@@ -1,11 +1,12 @@
 import os
 from contextlib import closing, redirect_stdout
 from io import StringIO
+from typing import Optional
 
 from IPython.utils.io import Tee
 from tqdm import tqdm
 
-from prosperity4bt.data import LIMITS, BacktestData, read_day_data
+from prosperity4bt.data import BacktestData, get_position_limit, read_day_data
 from prosperity4bt.datamodel import (
     ConversionObservation,
     Listing,
@@ -125,17 +126,19 @@ def enforce_limits(
     data: BacktestData,
     orders: dict[Symbol, list[Order]],
     sandbox_row: SandboxLogRow,
+    limits_override: Optional[dict[str, int]] = None,
 ) -> None:
     sandbox_log_lines = []
     for product in data.products:
         product_orders = orders.get(product, [])
         product_position = state.position.get(product, 0)
+        lim = get_position_limit(product, limits_override)
 
         total_long = sum(order.quantity for order in product_orders if order.quantity > 0)
         total_short = sum(abs(order.quantity) for order in product_orders if order.quantity < 0)
 
-        if product_position + total_long > LIMITS[product] or product_position - total_short < -LIMITS[product]:
-            sandbox_log_lines.append(f"Orders for product {product} exceeded limit of {LIMITS[product]} set")
+        if product_position + total_long > lim or product_position - total_short < -lim:
+            sandbox_log_lines.append(f"Orders for product {product} exceeded limit of {lim} set")
             orders.pop(product)
 
     if len(sandbox_log_lines) > 0:
@@ -148,13 +151,19 @@ def match_buy_order(
     order: Order,
     market_trades: list[MarketTrade],
     trade_matching_mode: TradeMatchingMode,
+    limits_override: Optional[dict[str, int]] = None,
 ) -> list[Trade]:
     trades = []
 
     order_depth = state.order_depths[order.symbol]
     price_matches = sorted(price for price in order_depth.sell_orders.keys() if price <= order.price)
     for price in price_matches:
-        volume = min(order.quantity, abs(order_depth.sell_orders[price]))
+        lim = get_position_limit(order.symbol, limits_override)
+        pos = state.position.get(order.symbol, 0)
+        max_buy = max(0, lim - pos)
+        volume = min(order.quantity, abs(order_depth.sell_orders[price]), max_buy)
+        if volume <= 0:
+            continue
 
         trades.append(Trade(order.symbol, price, volume, "SUBMISSION", "", state.timestamp))
 
@@ -180,7 +189,12 @@ def match_buy_order(
         ):
             continue
 
-        volume = min(order.quantity, market_trade.sell_quantity)
+        lim = get_position_limit(order.symbol, limits_override)
+        pos = state.position.get(order.symbol, 0)
+        max_buy = max(0, lim - pos)
+        volume = min(order.quantity, market_trade.sell_quantity, max_buy)
+        if volume <= 0:
+            continue
 
         trades.append(
             Trade(order.symbol, order.price, volume, "SUBMISSION", market_trade.trade.seller, state.timestamp)
@@ -204,13 +218,19 @@ def match_sell_order(
     order: Order,
     market_trades: list[MarketTrade],
     trade_matching_mode: TradeMatchingMode,
+    limits_override: Optional[dict[str, int]] = None,
 ) -> list[Trade]:
     trades = []
 
     order_depth = state.order_depths[order.symbol]
     price_matches = sorted((price for price in order_depth.buy_orders.keys() if price >= order.price), reverse=True)
     for price in price_matches:
-        volume = min(abs(order.quantity), order_depth.buy_orders[price])
+        lim = get_position_limit(order.symbol, limits_override)
+        pos = state.position.get(order.symbol, 0)
+        max_sell = max(0, pos + lim)
+        volume = min(abs(order.quantity), order_depth.buy_orders[price], max_sell)
+        if volume <= 0:
+            continue
 
         trades.append(Trade(order.symbol, price, volume, "", "SUBMISSION", state.timestamp))
 
@@ -236,7 +256,12 @@ def match_sell_order(
         ):
             continue
 
-        volume = min(abs(order.quantity), market_trade.buy_quantity)
+        lim = get_position_limit(order.symbol, limits_override)
+        pos = state.position.get(order.symbol, 0)
+        max_sell = max(0, pos + lim)
+        volume = min(abs(order.quantity), market_trade.buy_quantity, max_sell)
+        if volume <= 0:
+            continue
 
         trades.append(Trade(order.symbol, order.price, volume, market_trade.trade.buyer, "SUBMISSION", state.timestamp))
 
@@ -258,11 +283,12 @@ def match_order(
     order: Order,
     market_trades: list[MarketTrade],
     trade_matching_mode: TradeMatchingMode,
+    limits_override: Optional[dict[str, int]] = None,
 ) -> list[Trade]:
     if order.quantity > 0:
-        return match_buy_order(state, data, order, market_trades, trade_matching_mode)
+        return match_buy_order(state, data, order, market_trades, trade_matching_mode, limits_override)
     elif order.quantity < 0:
-        return match_sell_order(state, data, order, market_trades, trade_matching_mode)
+        return match_sell_order(state, data, order, market_trades, trade_matching_mode, limits_override)
     else:
         return []
 
@@ -273,6 +299,7 @@ def match_orders(
     orders: dict[Symbol, list[Order]],
     result: BacktestResult,
     trade_matching_mode: TradeMatchingMode,
+    limits_override: Optional[dict[str, int]] = None,
 ) -> None:
     market_trades = {
         product: [MarketTrade(t, t.quantity, t.quantity) for t in trades]
@@ -290,6 +317,7 @@ def match_orders(
                     order,
                     market_trades.get(product, []),
                     trade_matching_mode,
+                    limits_override,
                 )
             )
 
@@ -316,6 +344,7 @@ def run_backtest(
     trade_matching_mode: TradeMatchingMode,
     no_names: bool,
     show_progress_bar: bool,
+    limits_override: Optional[dict[str, int]] = None,
 ) -> BacktestResult:
     data = read_day_data(file_reader, round_num, day_num, no_names)
 
@@ -374,7 +403,7 @@ def run_backtest(
 
         type_check_orders(orders)
         create_activity_logs(state, data, result)
-        enforce_limits(state, data, orders, sandbox_row)
-        match_orders(state, data, orders, result, trade_matching_mode)
+        enforce_limits(state, data, orders, sandbox_row, limits_override)
+        match_orders(state, data, orders, result, trade_matching_mode, limits_override)
 
     return result

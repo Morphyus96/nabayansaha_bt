@@ -294,7 +294,7 @@ wheels = [
 ]
 
 [[package]]
-name = "prosperity4bt"
+name = "prosperity4btest"
 version = "0.0.0"
 source = { editable = "." }
 dependencies = [

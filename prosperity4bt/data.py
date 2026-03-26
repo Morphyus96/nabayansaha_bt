@@ -1,13 +1,18 @@
-from collections import defaultdict
 from dataclasses import dataclass
+from typing import Optional
 
 from prosperity4bt.datamodel import Symbol, Trade
 from prosperity4bt.file_reader import FileReader
 
-LIMITS = {
-    "TOMATOES": 80,
-    "EMERALDS": 80,
-}
+DEFAULT_POSITION_LIMIT = 50
+
+LIMITS: dict[str, int] = {"EMERALDS": 80, "TOMATOES": 80}
+
+
+def get_position_limit(symbol: str, overrides: Optional[dict[str, int]] = None) -> int:
+    if overrides is not None and symbol in overrides:
+        return overrides[symbol]
+    return LIMITS.get(symbol, DEFAULT_POSITION_LIMIT)
 
 
 @dataclass

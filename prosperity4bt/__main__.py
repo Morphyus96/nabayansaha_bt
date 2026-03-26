@@ -24,6 +24,28 @@ def parse_algorithm(algorithm: Path) -> Any:
     return import_module(algorithm.stem)
 
 
+def parse_limit_overrides(limit_opts: list[str]) -> Optional[dict[str, int]]:
+    if len(limit_opts) == 0:
+        return None
+    out: dict[str, int] = {}
+    for item in limit_opts:
+        if ":" not in item:
+            print(f"Error: --limit must be PRODUCT:NUMBER, got {item!r}")
+            sys.exit(1)
+        sym, num = item.split(":", 1)
+        sym = sym.strip()
+        num = num.strip()
+        if not sym or not num:
+            print(f"Error: invalid --limit {item!r}")
+            sys.exit(1)
+        try:
+            out[sym] = int(num)
+        except ValueError:
+            print(f"Error: invalid limit number in {item!r}")
+            sys.exit(1)
+    return out
+
+
 def parse_data(data_root: Optional[Path]) -> FileReader:
     if data_root is not None:
         return FileSystemReader(data_root)
@@ -177,7 +199,7 @@ def format_path(path: Path) -> str:
 
 def version_callback(value: bool) -> None:
     if value:
-        print(f"prosperity4bt {metadata.version(__package__)}")
+        print(f"prosperity4btest {metadata.version(__package__)}")
         sys.exit(0)
 
 
@@ -197,6 +219,14 @@ def cli(
     match_trades: Annotated[TradeMatchingMode, Option(help="How to match orders against market trades. 'all' matches trades with prices equal to or worse than your quotes, 'worse' matches trades with prices worse than your quotes, 'none' does not match trades against orders at all.")] = TradeMatchingMode.all,
     no_progress: Annotated[bool, Option("--no-progress", help="Don't show progress bars.")] = False,
     original_timestamps: Annotated[bool, Option("--original-timestamps", help="Preserve original timestamps in output log rather than making them increase across days.")] = False,
+    limit: Annotated[
+        list[str],
+        Option(
+            "--limit",
+            help="Override position limit for a product (PRODUCT:LIMIT). Repeat for multiple products.",
+            show_default=False,
+        ),
+    ] = [],
     version: Annotated[bool, Option("--version", "-v", help="Show the program's version number and exit.", is_eager=True, callback=version_callback)] = False,
 ) -> None:  # fmt: skip
     if out is not None and no_out:
@@ -218,6 +248,7 @@ def cli(
     output_file = parse_out(out, no_out)
 
     show_progress_bars = not no_progress and not print_output
+    limits_override = parse_limit_overrides(limit)
 
     results = []
     for round_num, day_num in parsed_days:
@@ -234,6 +265,7 @@ def cli(
             match_trades,
             True,
             show_progress_bars,
+            limits_override,
         )
 
         print_day_summary(result)
