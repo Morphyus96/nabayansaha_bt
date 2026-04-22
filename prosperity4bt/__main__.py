@@ -347,10 +347,10 @@ def cli(
         print(f"  bid(): {trader_bid:,.0f}")
         if round2_access_normalized == "accepted":
             adjusted_round2_profit = round2_profit - trader_bid
-            print(f"  assumed_access: accepted")
+            print("  assumed_access: accepted")
             print(f"  round2_profit_after_maf: {adjusted_round2_profit:,.0f}")
         elif round2_access_normalized == "rejected":
-            print(f"  assumed_access: rejected")
+            print("  assumed_access: rejected")
             print(f"  round2_profit_after_maf: {round2_profit:,.0f}")
         else:
             print("  assumed_access: unknown")
