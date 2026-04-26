@@ -141,17 +141,33 @@ def read_day_data(file_reader: FileReader, round_num: int, day_num: int, no_name
     trades = []
     with file_reader.file([f"round{round_num}", f"trades_round_{round_num}_day_{day_num}.csv"]) as file:
         if file is not None:
-            for line in file.read_text(encoding="utf-8").splitlines()[1:]:
+            lines = file.read_text(encoding="utf-8").splitlines()
+            if len(lines) > 0:
+                header_columns = lines[0].split(";")
+                header_index = {name: idx for idx, name in enumerate(header_columns)}
+            else:
+                header_index = {}
+
+            timestamp_index = header_index.get("timestamp", 0)
+            buyer_index = header_index.get("buyer", 1)
+            seller_index = header_index.get("seller", 2)
+            symbol_index = header_index.get("symbol", 3)
+            price_index = header_index.get("price", 5)
+            quantity_index = header_index.get("quantity", 6)
+
+            for line in lines[1:]:
                 columns = line.split(";")
+                buyer = None if no_names else columns[buyer_index]
+                seller = None if no_names else columns[seller_index]
 
                 trades.append(
                     Trade(
-                        symbol=columns[3],
-                        price=int(float(columns[5])),
-                        quantity=int(columns[6]),
-                        buyer=columns[1],
-                        seller=columns[2],
-                        timestamp=int(columns[0]),
+                        symbol=columns[symbol_index],
+                        price=int(float(columns[price_index])),
+                        quantity=int(columns[quantity_index]),
+                        buyer=buyer,
+                        seller=seller,
+                        timestamp=int(columns[timestamp_index]),
                     )
                 )
 
